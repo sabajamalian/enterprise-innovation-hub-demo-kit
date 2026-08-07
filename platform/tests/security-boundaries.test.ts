@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createRepositoryWriterCondition } from "../src/lib/kubernetes";
 
 const root = resolve(process.cwd(), "..");
 const bicep = readFileSync(resolve(root, "infra/modules/platform.bicep"), "utf8");
@@ -20,6 +21,28 @@ describe("deployment security boundaries", () => {
     expect(provisioner).toContain("federatedIdentityCredentials/github-main");
     expect(provisioner).toContain("`${aksId}/namespaces/${namespace}`");
     expect(provisioner).toContain("ROLE.aksNamespaceWriter");
+  });
+
+  it("uses a distinct exact-repository condition for each application", () => {
+    const first = createRepositoryWriterCondition("shelf-signal");
+    const second = createRepositoryWriterCondition("queue-compass");
+
+    expect(first).toContain("StringEqualsIgnoreCase 'shelf-signal'");
+    expect(second).toContain("StringEqualsIgnoreCase 'queue-compass'");
+    expect(first).not.toEqual(second);
+    expect(first).not.toContain("StringStartsWith");
+  });
+
+  it("does not let callers select an arbitrary ACR repository path", () => {
+    expect(() => createRepositoryWriterCondition("other-team/shelf-signal")).toThrow();
+    expect(provisioner).not.toContain("repositoryPath");
+  });
+
+  it("configures ACR for repository ABAC and avoids registry-wide push", () => {
+    expect(bicep).toContain("roleAssignmentMode: 'AbacRepositoryPermissions'");
+    expect(provisioner).toContain("ROLE.acrRepositoryWriter");
+    expect(provisioner).not.toContain("ROLE.acrPush");
+    expect(provisioner).toContain("conditionVersion: \"2.0\"");
   });
 
   it("sources GitHub App credentials from Key Vault", () => {

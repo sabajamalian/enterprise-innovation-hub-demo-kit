@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { createHash } from "node:crypto";
 import { DefaultAzureCredential } from "@azure/identity";
-import type { IdeaRequest } from "./contracts";
+import { ideaRequestSchema, repositorySlugSchema, type IdeaRequest } from "./contracts";
 
 export interface ApplicationInfrastructure {
   deployClientId: string;
@@ -14,10 +14,11 @@ export interface ApplicationInfrastructureProvisioner {
 
 export class KubernetesApplicationProvisioner implements ApplicationInfrastructureProvisioner {
   async create(request: IdeaRequest): Promise<ApplicationInfrastructure> {
-    const namespace = `app-${request.repositorySlug}`;
+    const validatedRequest = ideaRequestSchema.parse(request);
+    const namespace = `app-${validatedRequest.repositorySlug}`;
     const labels = {
       "innovation-hub/owner": "platform",
-      "innovation-hub/application": request.repositorySlug
+      "innovation-hub/application": validatedRequest.repositorySlug
     };
 
     await createResource("/api/v1/namespaces", {
@@ -28,7 +29,7 @@ export class KubernetesApplicationProvisioner implements ApplicationInfrastructu
     await createResource(`/api/v1/namespaces/${namespace}/serviceaccounts`, {
       apiVersion: "v1",
       kind: "ServiceAccount",
-      metadata: { name: request.repositorySlug, namespace, labels },
+      metadata: { name: validatedRequest.repositorySlug, namespace, labels },
       automountServiceAccountToken: false
     });
     await createResource(`/api/v1/namespaces/${namespace}/resourcequotas`, {
@@ -79,7 +80,7 @@ export class KubernetesApplicationProvisioner implements ApplicationInfrastructu
     await createResource(`/apis/postgresql.cnpg.io/v1/namespaces/${namespace}/clusters`, {
       apiVersion: "postgresql.cnpg.io/v1",
       kind: "Cluster",
-      metadata: { name: `${request.repositorySlug}-database`, namespace, labels },
+      metadata: { name: `${validatedRequest.repositorySlug}-database`, namespace, labels },
       spec: {
         instances: 2,
         storage: { size: "5Gi" },
@@ -87,7 +88,7 @@ export class KubernetesApplicationProvisioner implements ApplicationInfrastructu
         monitoring: { enablePodMonitor: true }
       }
     });
-    return createApplicationIdentity(request.repositorySlug, namespace);
+    return createApplicationIdentity(validatedRequest.repositorySlug, namespace);
   }
 }
 
@@ -101,10 +102,15 @@ interface ManagedIdentityResponse {
 }
 
 const ROLE = {
-  acrPush: "8311e382-0749-4cb8-b61a-304f252e45ec",
+  acrRepositoryWriter: "2a1e307c-b015-4ebd-883e-5b7698a07328",
   aksClusterUser: "4abbcc35-e782-43d8-92c5-2d3f1bd2253f",
   aksNamespaceWriter: "a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb"
 } as const;
+
+export function createRepositoryWriterCondition(repositorySlug: string): string {
+  const repository = repositorySlugSchema.parse(repositorySlug);
+  return `(((!(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'})) AND (!(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'})) AND (!(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'})) AND (!(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}))) OR (@Request[Microsoft.ContainerRegistry/registries/repositories:name] StringEqualsIgnoreCase '${repository}'))`;
+}
 
 async function createApplicationIdentity(
   repositorySlug: string,
@@ -152,7 +158,14 @@ async function createApplicationIdentity(
     `${resourceGroupId}/providers/Microsoft.ContainerRegistry/registries/${acrName}`;
   const aksId =
     `${resourceGroupId}/providers/Microsoft.ContainerService/managedClusters/${aksName}`;
-  await createRoleAssignment(token.token, subscriptionId, acrId, identity.properties.principalId, ROLE.acrPush);
+  await createRoleAssignment(
+    token.token,
+    subscriptionId,
+    acrId,
+    identity.properties.principalId,
+    ROLE.acrRepositoryWriter,
+    createRepositoryWriterCondition(repositorySlug)
+  );
   await createRoleAssignment(
     token.token,
     subscriptionId,
@@ -176,9 +189,10 @@ async function createRoleAssignment(
   subscriptionId: string,
   scope: string,
   principalId: string,
-  roleId: string
+  roleId: string,
+  condition?: string
 ): Promise<void> {
-  const assignmentId = deterministicGuid(`${scope}:${principalId}:${roleId}`);
+  const assignmentId = deterministicGuid(`${scope}:${principalId}:${roleId}:${condition ?? ""}`);
   await armPut(
     token,
     `${scope}/providers/Microsoft.Authorization/roleAssignments/${assignmentId}`,
@@ -188,7 +202,8 @@ async function createRoleAssignment(
         principalId,
         principalType: "ServicePrincipal",
         roleDefinitionId:
-          `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${roleId}`
+          `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${roleId}`,
+        ...(condition ? { condition, conditionVersion: "2.0" } : {})
       }
     }
   );

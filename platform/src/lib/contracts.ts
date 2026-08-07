@@ -1,9 +1,11 @@
 import { z } from "zod";
 
+export const repositorySlugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(80);
+
 export const ideaRequestSchema = z.object({
   name: z.string().trim().min(3).max(80),
   problem: z.string().trim().min(20).max(2000),
-  repositorySlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(80),
+  repositorySlug: repositorySlugSchema,
   audienceGroupIds: z.array(z.string().uuid()).min(1).max(20)
 });
 

@@ -24,6 +24,30 @@ jobs:
       - run: npm audit --omit=dev --audit-level=critical
       - run: npm run check:workflow-publication
 
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: base-manifest
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git cat-file -e "$BASE_SHA^{commit}"
+          if git ls-tree -r --name-only "$BASE_SHA" |
+            grep -Eq '(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile\.lock|go\.mod|Cargo\.lock|composer\.lock|pom\.xml|build\.gradle(\.kts)?|gradle\.lockfile|requirements[^/]*\.txt|Pipfile\.lock|poetry\.lock|packages\.lock\.json|[^/]+\.csproj|Package\.resolved)$'
+          then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.base-manifest.outputs.present == 'true'
+        uses: actions/dependency-review-action@v4
+      - if: steps.base-manifest.outputs.present != 'true'
+        run: echo "Skipping dependency review because the pull request base contains no supported dependency manifest."
+
   infrastructure:
     runs-on: ubuntu-latest
     steps:
