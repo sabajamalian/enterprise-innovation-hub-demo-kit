@@ -35,9 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-bicep@v2
       - uses: azure/setup-helm@v4
-      - run: bicep build infra/main.bicep --stdout >/dev/null
+      - run: az bicep install
+      - run: az bicep build --file infra/main.bicep --stdout >/dev/null
       - run: >-
           helm lint infra/helm/platform
           --set workloadIdentityClientId=00000000-0000-0000-0000-000000000001
