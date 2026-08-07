@@ -1,0 +1,107 @@
+name: Governed application deployment
+
+on:
+  workflow_call:
+    inputs:
+      app_name: { type: string, required: true }
+      app_url: { type: string, required: true }
+      audience_group_ids: { type: string, required: true }
+      azure_tenant_id: { type: string, required: true }
+      azure_subscription_id: { type: string, required: true }
+      azure_client_id: { type: string, required: true }
+      azure_resource_group: { type: string, required: true }
+      aks_cluster_name: { type: string, required: true }
+      acr_name: { type: string, required: true }
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Validate governed application name
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+        run: '[[ "$APP_NAME" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ inputs.azure_client_id }}
+          tenant-id: ${{ inputs.azure_tenant_id }}
+          subscription-id: ${{ inputs.azure_subscription_id }}
+      - name: Sign in to the assigned ACR repository
+        env:
+          ACR_NAME: ${{ inputs.acr_name }}
+          AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        run: |
+          access_token=$(az account get-access-token \
+            --resource https://containerregistry.azure.net \
+            --query accessToken --output tsv)
+          refresh_token=$(curl --fail --silent --show-error \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=access_token" \
+            --data-urlencode "service=$ACR_NAME.azurecr.io" \
+            --data-urlencode "tenant=$AZURE_TENANT_ID" \
+            --data-urlencode "access_token=$access_token" \
+            "https://$ACR_NAME.azurecr.io/oauth2/exchange" \
+            | jq --raw-output .refresh_token)
+          test -n "$refresh_token"
+          printf '%s' "$refresh_token" | docker login "$ACR_NAME.azurecr.io" \
+            --username 00000000-0000-0000-0000-000000000000 \
+            --password-stdin
+      - id: image
+        env:
+          ACR_NAME: ${{ inputs.acr_name }}
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          IMAGE="$ACR_NAME.azurecr.io/$APP_NAME:${{ github.sha }}"
+          docker build --pull --tag "$IMAGE" .
+          docker push "$IMAGE"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")
+          test -n "$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ inputs.azure_client_id }}
+          tenant-id: ${{ inputs.azure_tenant_id }}
+          subscription-id: ${{ inputs.azure_subscription_id }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ inputs.azure_resource_group }}
+          cluster-name: ${{ inputs.aks_cluster_name }}
+          admin: false
+          use-kubelogin: true
+      - name: Apply application-owned resources
+        env:
+          APP: ${{ inputs.app_name }}
+          APP_URL: ${{ inputs.app_url }}
+          AUDIENCE_GROUPS: ${{ inputs.audience_group_ids }}
+          IMAGE: ${{ needs.publish.outputs.digest }}
+        run: |
+          envsubst < .platform/kubernetes.yaml | kubectl apply -f -
+          kubectl -n "app-$APP" rollout status deployment/"$APP" --timeout=5m

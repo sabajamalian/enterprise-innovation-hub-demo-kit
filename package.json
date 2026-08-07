@@ -1,0 +1,20 @@
+{
+  "name": "enterprise-innovation-hub-demo-kit",
+  "private": true,
+  "workspaces": [
+    "platform",
+    "docs-site",
+    "templates/nextjs-postgres"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace platform",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check:workflow-publication": "node scripts/check-workflow-publication.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

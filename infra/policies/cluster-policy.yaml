@@ -1,0 +1,51 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: innovation-hub-workload-baseline
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-ownership-and-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["app-*"]
+      validate:
+        message: Application pods require ownership labels, requests, limits, and a non-root security context.
+        pattern:
+          metadata:
+            labels:
+              innovation-hub/owner: "?*"
+          spec:
+            securityContext:
+              runAsNonRoot: true
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+    - name: require-approved-registry
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["app-*"]
+      validate:
+        message: Images must come from the customer ACR.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.image }}"
+                    operator: NotMatches
+                    value: "*.azurecr.io/*@sha256:*"

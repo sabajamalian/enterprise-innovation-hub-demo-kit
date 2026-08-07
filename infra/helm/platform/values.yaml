@@ -1,0 +1,21 @@
+image:
+  repository: innovationhub.azurecr.io/hub
+  digest: ""
+domain: hub.example.com
+appDomain: apps.example.com
+creatorGroupId: ""
+adminGroupId: ""
+githubOrganization: ""
+platformClientId: ""
+platformIdentityResourceId: ""
+azureTenantId: ""
+azureSubscriptionId: ""
+azureResourceGroup: ""
+azureLocation: ""
+aksClusterName: ""
+acrName: ""
+keyVaultName: ""
+tlsContactEmail: ""
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: 1, memory: 1Gi }
