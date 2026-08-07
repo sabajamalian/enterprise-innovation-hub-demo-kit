@@ -37,7 +37,22 @@ helm upgrade --install oauth2-proxy oauth2-proxy/oauth2-proxy \
   --wait
 kubectl apply -f infra/policies/cluster-policy.yaml
 
-az acr login --name "$ACR_NAME"
+access_token=$(az account get-access-token \
+  --resource https://containerregistry.azure.net \
+  --query accessToken --output tsv)
+refresh_token=$(curl --fail --silent --show-error \
+  --request POST \
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=access_token" \
+  --data-urlencode "service=$ACR_NAME.azurecr.io" \
+  --data-urlencode "tenant=$AZURE_TENANT_ID" \
+  --data-urlencode "access_token=$access_token" \
+  "https://$ACR_NAME.azurecr.io/oauth2/exchange" \
+  | jq --raw-output .refresh_token)
+test -n "$refresh_token"
+printf '%s' "$refresh_token" | docker login "$ACR_NAME.azurecr.io" \
+  --username 00000000-0000-0000-0000-000000000000 \
+  --password-stdin
 image="$ACR_NAME.azurecr.io/innovation-hub:$AZURE_ENV_NAME"
 docker build --file platform/Dockerfile --tag "$image" .
 docker push "$image"

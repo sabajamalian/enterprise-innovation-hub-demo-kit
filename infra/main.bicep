@@ -4,6 +4,7 @@ targetScope = 'subscription'
 param environmentName string
 param location string = deployment().location
 param tenantId string = tenant().tenantId
+param deployerPrincipalId string
 @secure()
 param githubAppId string
 @secure()
@@ -38,6 +39,7 @@ module platform 'modules/platform.bicep' = {
     keyVaultName: keyVaultName
     identityName: identityName
     tenantId: tenantId
+    deployerPrincipalId: deployerPrincipalId
     githubAppId: githubAppId
     githubAppInstallationId: githubAppInstallationId
     githubAppPrivateKey: githubAppPrivateKey

@@ -4,6 +4,7 @@ param acrName string
 param keyVaultName string
 param identityName string
 param tenantId string
+param deployerPrincipalId string
 @secure()
 param githubAppId string
 @secure()
@@ -37,13 +38,14 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
   }
 }
 
-resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
+resource acr 'Microsoft.ContainerRegistry/registries@2025-05-01-preview' = {
   name: acrName
   location: location
   sku: { name: 'Standard' }
   properties: {
     adminUserEnabled: false
     anonymousPullEnabled: false
+    roleAssignmentMode: 'AbacRepositoryPermissions'
     publicNetworkAccess: 'Enabled'
     policies: {
       quarantinePolicy: { status: 'disabled' }
@@ -162,14 +164,27 @@ resource hubCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federat
   }
 }
 
-var acrPullRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, aks.id, acrPullRole)
+var repositoryReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b93aa761-3e63-49ed-ac28-beffa264f7ac')
+resource repositoryReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acr.id, aks.id, repositoryReaderRole)
   scope: acr
   properties: {
     principalId: aks.properties.identityProfile.kubeletidentity.objectId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: acrPullRole
+    roleDefinitionId: repositoryReaderRole
+  }
+}
+
+var repositoryWriterRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a1e307c-b015-4ebd-883e-5b7698a07328')
+resource platformImageWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acr.id, deployerPrincipalId, repositoryWriterRole, 'innovation-hub')
+  scope: acr
+  properties: {
+    principalId: deployerPrincipalId
+    roleDefinitionId: repositoryWriterRole
+    description: 'Write access to the innovation-hub platform image repository'
+    condition: '''( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringEqualsIgnoreCase 'innovation-hub' ) )'''
+    conditionVersion: '2.0'
   }
 }
 
@@ -192,7 +207,7 @@ resource rbacAdministrator 'Microsoft.Authorization/roleAssignments@2022-04-01' 
     principalId: platformIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: rbacAdministratorRole
-    condition: '''((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {8311e382-0749-4cb8-b61a-304f252e45ec,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {8311e382-0749-4cb8-b61a-304f252e45ec,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb}))'''
+    condition: '''((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {2a1e307c-b015-4ebd-883e-5b7698a07328,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {2a1e307c-b015-4ebd-883e-5b7698a07328,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb}))'''
     conditionVersion: '2.0'
   }
 }

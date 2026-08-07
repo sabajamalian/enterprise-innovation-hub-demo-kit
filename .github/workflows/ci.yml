@@ -24,6 +24,30 @@ jobs:
       - run: npm audit --omit=dev --audit-level=critical
       - run: npm run check:workflow-publication
 
+  dependency-review-precheck:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      has_dependencies: ${{ steps.detect.outputs.has_dependencies }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: echo "has_dependencies=$(./scripts/base-has-dependencies.sh "$BASE_SHA")" >> "$GITHUB_OUTPUT"
+
+  dependency-review:
+    needs: dependency-review-precheck
+    if: needs.dependency-review-precheck.outputs.has_dependencies == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+
   infrastructure:
     runs-on: ubuntu-latest
     steps:

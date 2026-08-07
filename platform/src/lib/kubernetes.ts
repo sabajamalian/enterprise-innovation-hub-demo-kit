@@ -100,8 +100,10 @@ interface ManagedIdentityResponse {
   };
 }
 
+export const ACR_REPOSITORY_WRITER_ROLE_ID = "2a1e307c-b015-4ebd-883e-5b7698a07328";
+
 const ROLE = {
-  acrPush: "8311e382-0749-4cb8-b61a-304f252e45ec",
+  acrRepositoryWriter: ACR_REPOSITORY_WRITER_ROLE_ID,
   aksClusterUser: "4abbcc35-e782-43d8-92c5-2d3f1bd2253f",
   aksNamespaceWriter: "a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb"
 } as const;
@@ -152,7 +154,14 @@ async function createApplicationIdentity(
     `${resourceGroupId}/providers/Microsoft.ContainerRegistry/registries/${acrName}`;
   const aksId =
     `${resourceGroupId}/providers/Microsoft.ContainerService/managedClusters/${aksName}`;
-  await createRoleAssignment(token.token, subscriptionId, acrId, identity.properties.principalId, ROLE.acrPush);
+  await createRoleAssignment(
+    token.token,
+    subscriptionId,
+    acrId,
+    identity.properties.principalId,
+    ROLE.acrRepositoryWriter,
+    repositoryWriterCondition(repositorySlug)
+  );
   await createRoleAssignment(
     token.token,
     subscriptionId,
@@ -176,9 +185,10 @@ async function createRoleAssignment(
   subscriptionId: string,
   scope: string,
   principalId: string,
-  roleId: string
+  roleId: string,
+  condition?: string
 ): Promise<void> {
-  const assignmentId = deterministicGuid(`${scope}:${principalId}:${roleId}`);
+  const assignmentId = deterministicGuid(`${scope}:${principalId}:${roleId}:${condition ?? ""}`);
   await armPut(
     token,
     `${scope}/providers/Microsoft.Authorization/roleAssignments/${assignmentId}`,
@@ -188,10 +198,29 @@ async function createRoleAssignment(
         principalId,
         principalType: "ServicePrincipal",
         roleDefinitionId:
-          `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${roleId}`
+          `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${roleId}`,
+        ...(condition ? { condition, conditionVersion: "2.0" } : {})
       }
     }
   );
+}
+
+export function repositoryWriterCondition(repository: string): string {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(repository)) {
+    throw new Error("ACR repository names must match the governed application slug.");
+  }
+  return [
+    "(",
+    " (",
+    "  !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'})",
+    "  AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'})",
+    "  AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'})",
+    "  AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'})",
+    " )",
+    " OR",
+    ` (@Request[Microsoft.ContainerRegistry/registries/repositories:name] StringEqualsIgnoreCase '${repository}')`,
+    ")"
+  ].join("");
 }
 
 async function armPut<T = unknown>(

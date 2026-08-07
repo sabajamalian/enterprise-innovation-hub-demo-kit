@@ -37,4 +37,4 @@ cp .env.example .env
 ./infra/scripts/preflight.sh
 ```
 
-The command fails on missing tools, invalid identifiers, an inaccessible subscription, or missing GitHub App configuration.
+Set `AZURE_PRINCIPAL_ID` to the object ID of the identity running `azd up`. Bicep grants that identity Repository Writer only for the `innovation-hub` platform image path. The command fails on missing tools, invalid identifiers, an inaccessible subscription, or missing GitHub App configuration.

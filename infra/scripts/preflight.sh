@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-required_commands="az azd docker kubectl helm"
+required_commands="az azd curl docker helm jq kubectl"
 for command in $required_commands; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
@@ -9,7 +9,7 @@ for command in $required_commands; do
   }
 done
 
-required_variables="AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID GITHUB_ORG GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY ENTRA_CREATOR_GROUP_ID ENTRA_ADMIN_GROUP_ID ENTRA_APP_CLIENT_ID ENTRA_APP_CLIENT_SECRET HUB_DOMAIN APP_DOMAIN TLS_CONTACT_EMAIL"
+required_variables="AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_PRINCIPAL_ID GITHUB_ORG GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY ENTRA_CREATOR_GROUP_ID ENTRA_ADMIN_GROUP_ID ENTRA_APP_CLIENT_ID ENTRA_APP_CLIENT_SECRET HUB_DOMAIN APP_DOMAIN TLS_CONTACT_EMAIL"
 for variable in $required_variables; do
   eval "value=\${$variable:-}"
   test -n "$value" || {
