@@ -1,0 +1,43 @@
+:root {
+  --sl-color-accent-low: #3d2d18;
+  --sl-color-accent: #e0922f;
+  --sl-color-accent-high: #f4efe6;
+  --sl-color-white: #f4efe6;
+  --sl-color-gray-1: #e8e1d3;
+  --sl-color-gray-2: #aeb3aa;
+  --sl-color-gray-3: #6b7b6e;
+  --sl-color-gray-4: #3a4048;
+  --sl-color-gray-5: #24282d;
+  --sl-color-gray-6: #1b1e22;
+  --sl-color-black: #15181b;
+  --sl-font: Inter, ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+[data-theme="light"] {
+  --sl-color-accent-low: #e8e1d3;
+  --sl-color-accent: #9b5b0d;
+  --sl-color-accent-high: #3d2d18;
+  --sl-color-white: #15181b;
+  --sl-color-gray-1: #24282d;
+  --sl-color-gray-2: #3a4048;
+  --sl-color-gray-3: #6b7b6e;
+  --sl-color-gray-4: #aeb3aa;
+  --sl-color-gray-5: #e8e1d3;
+  --sl-color-gray-6: #eee9df;
+  --sl-color-gray-7: #f4efe6;
+  --sl-color-black: #fffdf8;
+}
+
+h1, h2 {
+  letter-spacing: -0.025em;
+}
+
+.hero .tagline {
+  max-width: 62ch;
+}
+
+pre {
+  border-left: 3px solid #e0922f;
+  border-radius: 2px;
+}

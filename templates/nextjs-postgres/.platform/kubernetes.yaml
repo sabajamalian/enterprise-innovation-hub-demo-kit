@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${APP}-config
+  namespace: app-${APP}
+data:
+  ENTRA_AUDIENCE_GROUP_IDS: ${AUDIENCE_GROUPS}
+  APP_URL: ${APP_URL}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP}
+  namespace: app-${APP}
+  labels:
+    app.kubernetes.io/name: ${APP}
+    innovation-hub/owner: generated-repository
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ${APP}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ${APP}
+        innovation-hub/owner: generated-repository
+    spec:
+      serviceAccountName: ${APP}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: ${APP}-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ${APP}-database-app, key: uri }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          readinessProbe:
+            httpGet: { path: /api/ready, port: 3000 }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 20
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      initContainers:
+        - name: migrate
+          image: ${IMAGE}
+          command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+          envFrom:
+            - configMapRef:
+                name: ${APP}-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ${APP}-database-app, key: uri }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APP}
+  namespace: app-${APP}
+spec:
+  selector:
+    app.kubernetes.io/name: ${APP}
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: app-${APP}
+spec:
+  type: ExternalName
+  externalName: oauth2-proxy.oauth2-proxy.svc.cluster.local
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${APP}-auth
+  namespace: app-${APP}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/auth-url: http://oauth2-proxy.oauth2-proxy.svc.cluster.local/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-signin: https://${APP_URL}/oauth2/start?rd=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [${APP_URL}]
+      secretName: ${APP}-tls
+  rules:
+    - host: ${APP_URL}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${APP}
+                port: { number: 80 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${APP}-oauth
+  namespace: app-${APP}
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [${APP_URL}]
+      secretName: ${APP}-tls
+  rules:
+    - host: ${APP_URL}
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port: { number: 80 }

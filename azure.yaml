@@ -1,0 +1,17 @@
+name: enterprise-innovation-hub
+metadata:
+  template: enterprise-innovation-hub-demo-kit@0.1.0
+infra:
+  provider: bicep
+  path: infra
+services:
+  hub:
+    project: ./platform
+    host: aks
+hooks:
+  preprovision:
+    shell: sh
+    run: ./infra/scripts/preflight.sh
+  postprovision:
+    shell: sh
+    run: ./infra/scripts/postprovision.sh

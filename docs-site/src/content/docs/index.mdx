@@ -1,0 +1,42 @@
+---
+title: Enterprise Innovation Hub
+description: Field guide for a governed, bottom-up innovation demonstration.
+template: splash
+hero:
+  tagline: Move an employee idea through a governed software delivery system, from intake to a running AKS workload.
+  actions:
+    - text: Prepare the demo
+      link: /enterprise-innovation-hub-demo-kit/preparation/
+      icon: right-arrow
+      variant: primary
+    - text: Read the architecture
+      link: /enterprise-innovation-hub-demo-kit/architecture/
+      icon: open-book
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The workflow is the demonstration
+
+An employee submits a store-operations problem. The Hub verifies Entra group membership, creates a private repository from a governed template, provisions an isolated application boundary, and returns the repository and application URLs.
+
+The employee continues in Copilot CLI, Copilot Desktop, or VS Code agent mode. Checked-in agents frame the idea, design the solution, build it, verify it, and prepare the demo. A push to `main` enters the controlled deployment path.
+
+```text
+Entra user -> Hub idea form -> durable operation -> GitHub App
+                                            \-> AKS namespace + identity + Postgres
+Builder -> repository agents -> pull request -> reusable OIDC workflow -> AKS
+```
+
+<Aside type="caution" title="Demo boundary">
+This kit exposes the controls needed for a customer conversation. Private networking, organizational approval, DNS delegation, regional capacity, backup policy, and incident operations still require customer-specific production design.
+</Aside>
+
+## What to prove live
+
+1. Identity is established before idea intake.
+2. Repository creation uses a customer-installed GitHub App.
+3. The generated repository owns application code, while platform controls remain central.
+4. GitHub Actions receives a short-lived Azure token through OIDC.
+5. The application runs in its own namespace with quota, network policy, identity, and database.
+6. Deleting the runtime leaves the source repository intact.

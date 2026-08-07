@@ -1,0 +1,25 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  packages: read
+
+jobs:
+  deploy:
+    uses: sabajamalian/enterprise-innovation-hub-demo-kit/.github/workflows/reusable-app-deploy.yml@main
+    with:
+      app_name: ${{ vars.APP_NAME }}
+      app_url: ${{ vars.APP_URL }}
+      audience_group_ids: ${{ vars.ENTRA_AUDIENCE_GROUP_IDS }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID }}
+      azure_resource_group: ${{ vars.AZURE_RESOURCE_GROUP }}
+      aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+      acr_name: ${{ vars.ACR_NAME }}

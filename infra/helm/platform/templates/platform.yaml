@@ -1,0 +1,222 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: innovation-hub-system
+  labels:
+    innovation-hub/tier: platform
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hub
+  namespace: innovation-hub-system
+  annotations:
+    azure.workload.identity/client-id: {{ required "workloadIdentityClientId is required" .Values.workloadIdentityClientId | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hub
+  namespace: innovation-hub-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: hub }
+  template:
+    metadata:
+      labels:
+        app: hub
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: hub
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: hub
+          image: "{{ .Values.image.repository }}@{{ required "image.digest is required" .Values.image.digest }}"
+          ports: [{ containerPort: 3000 }]
+          env:
+            - { name: ENTRA_CREATOR_GROUP_ID, value: {{ .Values.creatorGroupId | quote }} }
+            - { name: ENTRA_ADMIN_GROUP_ID, value: {{ .Values.adminGroupId | quote }} }
+            - { name: GITHUB_ORG, value: {{ .Values.githubOrganization | quote }} }
+            - { name: APP_DEPLOY_IDENTITY_RESOURCE_ID, value: {{ .Values.deployIdentityResourceId | quote }} }
+            - { name: APP_DEPLOY_CLIENT_ID, value: {{ .Values.workloadIdentityClientId | quote }} }
+            - { name: AZURE_TENANT_ID, value: {{ .Values.azureTenantId | quote }} }
+            - { name: AZURE_SUBSCRIPTION_ID, value: {{ .Values.azureSubscriptionId | quote }} }
+            - { name: AZURE_RESOURCE_GROUP, value: {{ .Values.azureResourceGroup | quote }} }
+            - { name: AKS_CLUSTER_NAME, value: {{ .Values.aksClusterName | quote }} }
+            - { name: ACR_NAME, value: {{ .Values.acrName | quote }} }
+            - { name: APP_DOMAIN, value: {{ .Values.appDomain | quote }} }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: hub-database-app, key: uri }
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef: { name: hub-github-app, key: app-id }
+            - name: GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef: { name: hub-github-app, key: installation-id }
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef: { name: hub-github-app, key: private-key }
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          readinessProbe: { httpGet: { path: /api/health, port: 3000 } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub
+  namespace: innovation-hub-system
+spec:
+  selector: { app: hub }
+  ports: [{ port: 80, targetPort: 3000 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: innovation-hub-system
+spec:
+  type: ExternalName
+  externalName: oauth2-proxy.oauth2-proxy.svc.cluster.local
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hub-auth
+  namespace: innovation-hub-system
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/auth-url: http://oauth2-proxy.oauth2-proxy.svc.cluster.local/oauth2/auth
+    nginx.ingress.kubernetes.io/auth-signin: https://{{ .Values.domain }}/oauth2/start?rd=$escaped_request_uri
+    nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [{{ .Values.domain | quote }}]
+      secretName: hub-tls
+  rules:
+    - host: {{ .Values.domain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hub
+                port: { number: 80 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hub-oauth
+  namespace: innovation-hub-system
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [{{ .Values.domain | quote }}]
+      secretName: hub-tls
+  rules:
+    - host: {{ .Values.domain | quote }}
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port: { number: 80 }
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: hub-database
+  namespace: innovation-hub-system
+spec:
+  instances: 2
+  storage: { size: 10Gi }
+  bootstrap:
+    initdb:
+      database: hub
+      owner: hub
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    email: {{ required "tlsContactEmail is required" .Values.tlsContactEmail | quote }}
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-production
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: innovation-hub-provisioner
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, serviceaccounts, resourcequotas]
+    verbs: [get, list, create]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, create]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: innovation-hub-provisioner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: innovation-hub-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: hub
+    namespace: innovation-hub-system
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hub-boundary
+  namespace: innovation-hub-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - podSelector: {}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32]
+      ports:
+        - { protocol: TCP, port: 443 }
