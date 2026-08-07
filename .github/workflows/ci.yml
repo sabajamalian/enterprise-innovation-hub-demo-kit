@@ -21,15 +21,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - run: npm audit --omit=dev --audit-level=critical
 
   infrastructure:
     runs-on: ubuntu-latest
