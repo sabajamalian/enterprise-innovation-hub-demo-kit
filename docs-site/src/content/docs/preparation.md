@@ -22,7 +22,7 @@ Create a GitHub App owned by the customer organization. Disable webhooks for the
 | Metadata | Read | Resolve installation and repository metadata |
 | Workflows | Read and write | Install the governed deployment caller |
 
-Install the app on the target organization. Record the App ID and Installation ID. Put the private key in the deployment environment, then let `azd up` store it in Key Vault.
+Fork the demo-kit repository into the customer organization, then install the app for all repositories in the dedicated demo organization. That scope lets the installation token read the customer-owned template, create a repository, and configure the repository it just created. Record the App ID and Installation ID. Put the private key in the deployment environment, then let `azd up` store it in Key Vault.
 
 ## Entra contract
 

@@ -18,8 +18,9 @@ export class GitHubAppRepositoryProvisioner implements RepositoryProvisioner {
     const auth = createAppAuth({ appId, privateKey, installationId });
     const installation = await auth({ type: "installation" });
     const octokit = new Octokit({ auth: installation.token });
-    const templateOwner = process.env.GITHUB_TEMPLATE_OWNER ?? "sabajamalian";
+    const templateOwner = process.env.GITHUB_TEMPLATE_OWNER ?? input.organization;
     const templateRepo = process.env.GITHUB_TEMPLATE_REPO ?? "enterprise-innovation-hub-demo-kit";
+    const template = await resolveTemplateSource(octokit, templateOwner, templateRepo);
 
     let repositoryUrl: string;
     try {
@@ -41,10 +42,10 @@ export class GitHubAppRepositoryProvisioner implements RepositoryProvisioner {
     }
 
     await copyTemplateDirectory(
-      new Octokit(),
       octokit,
       templateOwner,
       templateRepo,
+      template.sha,
       "templates/nextjs-postgres",
       input.organization,
       input.name
@@ -64,19 +65,31 @@ export class GitHubAppRepositoryProvisioner implements RepositoryProvisioner {
 }
 
 async function copyTemplateDirectory(
-  source: Octokit,
-  destination: Octokit,
+  octokit: Octokit,
   sourceOwner: string,
   sourceRepo: string,
+  sourceSha: string,
   sourcePath: string,
   destinationOwner: string,
   destinationRepo: string
 ): Promise<void> {
-  const listing = await source.repos.getContent({
-    owner: sourceOwner,
-    repo: sourceRepo,
-    path: sourcePath
-  });
+  let listing;
+  try {
+    listing = await octokit.repos.getContent({
+      owner: sourceOwner,
+      repo: sourceRepo,
+      path: sourcePath,
+      ref: sourceSha
+    });
+  } catch (error) {
+    if (hasStatus(error, 403) || hasStatus(error, 404)) {
+      throw new Error(
+        `The GitHub App installation cannot read ${sourceOwner}/${sourceRepo}/${sourcePath}. ` +
+        "Install the app on the customer-owned demo-kit repository."
+      );
+    }
+    throw error;
+  }
   if (!Array.isArray(listing.data)) {
     throw new Error(`Template path ${sourcePath} is not a directory.`);
   }
@@ -84,10 +97,10 @@ async function copyTemplateDirectory(
   for (const item of listing.data) {
     if (item.type === "dir") {
       await copyTemplateDirectory(
-        source,
-        destination,
+        octokit,
         sourceOwner,
         sourceRepo,
+        sourceSha,
         item.path,
         destinationOwner,
         destinationRepo
@@ -96,18 +109,29 @@ async function copyTemplateDirectory(
     }
     if (item.type !== "file") continue;
 
-    const file = await source.repos.getContent({
-      owner: sourceOwner,
-      repo: sourceRepo,
-      path: item.path
-    });
+    let file;
+    try {
+      file = await octokit.repos.getContent({
+        owner: sourceOwner,
+        repo: sourceRepo,
+        path: item.path,
+        ref: sourceSha
+      });
+    } catch (error) {
+      if (hasStatus(error, 403) || hasStatus(error, 404)) {
+        throw new Error(
+          `The GitHub App installation cannot read template file ${sourceOwner}/${sourceRepo}/${item.path}.`
+        );
+      }
+      throw error;
+    }
     if (Array.isArray(file.data) || file.data.type !== "file" || !("content" in file.data)) {
       throw new Error(`Unable to read template file ${item.path}.`);
     }
     const destinationPath = item.path.slice(`${sourcePath.split("/").slice(0, 2).join("/")}/`.length);
     let sha: string | undefined;
     try {
-      const existing = await destination.repos.getContent({
+      const existing = await octokit.repos.getContent({
         owner: destinationOwner,
         repo: destinationRepo,
         path: destinationPath
@@ -116,13 +140,60 @@ async function copyTemplateDirectory(
     } catch (error) {
       if (!(error instanceof Error) || !("status" in error) || error.status !== 404) throw error;
     }
-    await destination.repos.createOrUpdateFileContents({
+    const sourceContent = file.data.content.replaceAll("\n", "");
+    const content = destinationPath === ".github/workflows/deploy.yml"
+      ? pinReusableWorkflow(sourceContent, sourceSha, `${sourceOwner}/${sourceRepo}`)
+      : sourceContent;
+    await octokit.repos.createOrUpdateFileContents({
       owner: destinationOwner,
       repo: destinationRepo,
       path: destinationPath,
       message: `Initialize ${destinationPath}`,
-      content: file.data.content.replaceAll("\n", ""),
+      content,
       sha
     });
   }
+}
+
+async function resolveTemplateSource(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<{ sha: string }> {
+  try {
+    const repository = await octokit.repos.get({ owner, repo });
+    const reference = await octokit.git.getRef({
+      owner,
+      repo,
+      ref: `heads/${repository.data.default_branch}`
+    });
+    return { sha: reference.data.object.sha };
+  } catch (error) {
+    if (hasStatus(error, 403) || hasStatus(error, 404)) {
+      throw new Error(
+        `The GitHub App installation cannot resolve the default branch of ${owner}/${repo}.`
+      );
+    }
+    throw error;
+  }
+}
+
+export function pinReusableWorkflow(
+  base64Content: string,
+  sourceSha: string,
+  workflowRepository: string
+): string {
+  const workflow = Buffer.from(base64Content, "base64").toString("utf8");
+  const marker =
+    "customer-organization/enterprise-innovation-hub-demo-kit/.github/workflows/reusable-app-deploy.yml@main";
+  if (!workflow.includes(marker)) {
+    throw new Error("The generated deployment workflow does not contain the expected publication marker.");
+  }
+  const pinned =
+    `${workflowRepository}/.github/workflows/reusable-app-deploy.yml@${sourceSha}`;
+  return Buffer.from(workflow.replace(marker, pinned)).toString("base64");
+}
+
+function hasStatus(error: unknown, status: number): boolean {
+  return error instanceof Error && "status" in error && error.status === status;
 }

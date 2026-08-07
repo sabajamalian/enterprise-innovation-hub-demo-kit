@@ -26,7 +26,7 @@ export class IdeaProvisioner {
       if (!organization) throw new Error("GITHUB_ORG is not configured.");
       const applicationHost = `${request.repositorySlug}.${process.env.APP_DOMAIN ?? "apps.example.com"}`;
       const applicationUrl = `https://${applicationHost}`;
-      await this.infrastructure.create(request);
+      const infrastructure = await this.infrastructure.create(request);
       const result = await this.repositories.create({
         organization,
         name: request.repositorySlug,
@@ -38,7 +38,7 @@ export class IdeaProvisioner {
           ENTRA_AUDIENCE_GROUP_IDS: request.audienceGroupIds.join(","),
           AZURE_TENANT_ID: process.env.AZURE_TENANT_ID ?? "",
           AZURE_SUBSCRIPTION_ID: process.env.AZURE_SUBSCRIPTION_ID ?? "",
-          AZURE_CLIENT_ID: process.env.APP_DEPLOY_CLIENT_ID ?? "",
+          AZURE_CLIENT_ID: infrastructure.deployClientId,
           AZURE_RESOURCE_GROUP: process.env.AZURE_RESOURCE_GROUP ?? "",
           AKS_CLUSTER_NAME: process.env.AKS_CLUSTER_NAME ?? "",
           ACR_NAME: process.env.ACR_NAME ?? ""

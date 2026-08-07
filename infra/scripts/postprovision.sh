@@ -43,27 +43,23 @@ docker build --file platform/Dockerfile --tag "$image" .
 docker push "$image"
 digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image" | cut -d@ -f2)
 
-kubectl create namespace innovation-hub-system --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n innovation-hub-system create secret generic hub-github-app \
-  --from-literal=app-id="$GITHUB_APP_ID" \
-  --from-literal=installation-id="$GITHUB_APP_INSTALLATION_ID" \
-  --from-literal=private-key="$GITHUB_APP_PRIVATE_KEY" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
 helm upgrade --install innovation-hub infra/helm/platform \
   --namespace innovation-hub-system \
+  --create-namespace \
   --set image.repository="$ACR_NAME.azurecr.io/innovation-hub" \
   --set image.digest="$digest" \
   --set creatorGroupId="$ENTRA_CREATOR_GROUP_ID" \
   --set adminGroupId="$ENTRA_ADMIN_GROUP_ID" \
   --set githubOrganization="$GITHUB_ORG" \
-  --set workloadIdentityClientId="$APP_DEPLOY_CLIENT_ID" \
-  --set deployIdentityResourceId="$APP_DEPLOY_IDENTITY_RESOURCE_ID" \
+  --set platformClientId="$PLATFORM_CLIENT_ID" \
+  --set platformIdentityResourceId="$PLATFORM_IDENTITY_RESOURCE_ID" \
   --set azureTenantId="$AZURE_TENANT_ID" \
   --set azureSubscriptionId="$AZURE_SUBSCRIPTION_ID" \
   --set azureResourceGroup="$AZURE_RESOURCE_GROUP" \
+  --set azureLocation="$AZURE_LOCATION" \
   --set aksClusterName="$AKS_CLUSTER_NAME" \
   --set acrName="$ACR_NAME" \
+  --set keyVaultName="$KEY_VAULT_NAME" \
   --set domain="$HUB_DOMAIN" \
   --set appDomain="$APP_DOMAIN" \
   --set tlsContactEmail="$TLS_CONTACT_EMAIL" \

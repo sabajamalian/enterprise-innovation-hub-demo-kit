@@ -4,10 +4,6 @@ metadata:
 infra:
   provider: bicep
   path: infra
-services:
-  hub:
-    project: ./platform
-    host: aks
 hooks:
   preprovision:
     shell: sh

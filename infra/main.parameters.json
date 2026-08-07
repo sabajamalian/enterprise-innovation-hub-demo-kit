@@ -5,7 +5,8 @@
     "environmentName": { "value": "${AZURE_ENV_NAME}" },
     "location": { "value": "${AZURE_LOCATION}" },
     "tenantId": { "value": "${AZURE_TENANT_ID}" },
-    "githubOrganization": { "value": "${GITHUB_ORG}" },
-    "githubRepository": { "value": "enterprise-innovation-hub-demo-kit" }
+    "githubAppId": { "value": "${GITHUB_APP_ID}" },
+    "githubAppInstallationId": { "value": "${GITHUB_APP_INSTALLATION_ID}" },
+    "githubAppPrivateKey": { "value": "${GITHUB_APP_PRIVATE_KEY}" }
   }
 }

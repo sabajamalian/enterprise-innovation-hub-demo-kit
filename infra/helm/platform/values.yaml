@@ -6,12 +6,15 @@ appDomain: apps.example.com
 creatorGroupId: ""
 adminGroupId: ""
 githubOrganization: ""
-deployIdentityResourceId: ""
+platformClientId: ""
+platformIdentityResourceId: ""
 azureTenantId: ""
 azureSubscriptionId: ""
 azureResourceGroup: ""
+azureLocation: ""
 aksClusterName: ""
 acrName: ""
+keyVaultName: ""
 tlsContactEmail: ""
 resources:
   requests: { cpu: 100m, memory: 256Mi }

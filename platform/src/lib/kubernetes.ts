@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
+import { createHash } from "node:crypto";
 import { DefaultAzureCredential } from "@azure/identity";
 import type { IdeaRequest } from "./contracts";
 
+export interface ApplicationInfrastructure {
+  deployClientId: string;
+}
+
 export interface ApplicationInfrastructureProvisioner {
-  create(request: IdeaRequest): Promise<void>;
+  create(request: IdeaRequest): Promise<ApplicationInfrastructure>;
 }
 
 export class KubernetesApplicationProvisioner implements ApplicationInfrastructureProvisioner {
-  async create(request: IdeaRequest): Promise<void> {
+  async create(request: IdeaRequest): Promise<ApplicationInfrastructure> {
     const namespace = `app-${request.repositorySlug}`;
     const labels = {
       "innovation-hub/owner": "platform",
@@ -82,40 +87,139 @@ export class KubernetesApplicationProvisioner implements ApplicationInfrastructu
         monitoring: { enablePodMonitor: true }
       }
     });
-    await createFederatedCredential(request.repositorySlug);
+    return createApplicationIdentity(request.repositorySlug, namespace);
   }
 }
 
-async function createFederatedCredential(repositorySlug: string): Promise<void> {
-  const identityResourceId = process.env.APP_DEPLOY_IDENTITY_RESOURCE_ID;
+interface ManagedIdentityResponse {
+  id: string;
+  location: string;
+  properties: {
+    clientId: string;
+    principalId: string;
+  };
+}
+
+const ROLE = {
+  acrPush: "8311e382-0749-4cb8-b61a-304f252e45ec",
+  aksClusterUser: "4abbcc35-e782-43d8-92c5-2d3f1bd2253f",
+  aksNamespaceWriter: "a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb"
+} as const;
+
+async function createApplicationIdentity(
+  repositorySlug: string,
+  namespace: string
+): Promise<ApplicationInfrastructure> {
   const organization = process.env.GITHUB_ORG;
-  if (!identityResourceId || !organization) {
-    throw new Error("Deployment identity resource ID and GitHub organization are required.");
+  const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
+  const resourceGroup = process.env.AZURE_RESOURCE_GROUP;
+  const location = process.env.AZURE_LOCATION;
+  const aksName = process.env.AKS_CLUSTER_NAME;
+  const acrName = process.env.ACR_NAME;
+  if (!organization || !subscriptionId || !resourceGroup || !location || !aksName || !acrName) {
+    throw new Error("Azure application identity configuration is incomplete.");
   }
+
   const credential = new DefaultAzureCredential();
   const token = await credential.getToken("https://management.azure.com/.default");
   if (!token) throw new Error("Azure workload identity did not return an ARM token.");
 
-  const name = `github-${repositorySlug}`.slice(0, 120);
+  const resourceGroupId = `/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}`;
+  const identityName = `id-${repositorySlug}-deploy`.slice(0, 128);
+  const identityId =
+    `${resourceGroupId}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${identityName}`;
+  const identity = await armPut<ManagedIdentityResponse>(
+    token.token,
+    identityId,
+    "2023-01-31",
+    { location }
+  );
+
+  await armPut(
+    token.token,
+    `${identityId}/federatedIdentityCredentials/github-main`,
+    "2023-01-31",
+    {
+      properties: {
+        audiences: ["api://AzureADTokenExchange"],
+        issuer: "https://token.actions.githubusercontent.com",
+        subject: `repo:${organization}/${repositorySlug}:ref:refs/heads/main`
+      }
+    }
+  );
+
+  const acrId =
+    `${resourceGroupId}/providers/Microsoft.ContainerRegistry/registries/${acrName}`;
+  const aksId =
+    `${resourceGroupId}/providers/Microsoft.ContainerService/managedClusters/${aksName}`;
+  await createRoleAssignment(token.token, subscriptionId, acrId, identity.properties.principalId, ROLE.acrPush);
+  await createRoleAssignment(
+    token.token,
+    subscriptionId,
+    aksId,
+    identity.properties.principalId,
+    ROLE.aksClusterUser
+  );
+  await createRoleAssignment(
+    token.token,
+    subscriptionId,
+    `${aksId}/namespaces/${namespace}`,
+    identity.properties.principalId,
+    ROLE.aksNamespaceWriter
+  );
+
+  return { deployClientId: identity.properties.clientId };
+}
+
+async function createRoleAssignment(
+  token: string,
+  subscriptionId: string,
+  scope: string,
+  principalId: string,
+  roleId: string
+): Promise<void> {
+  const assignmentId = deterministicGuid(`${scope}:${principalId}:${roleId}`);
+  await armPut(
+    token,
+    `${scope}/providers/Microsoft.Authorization/roleAssignments/${assignmentId}`,
+    "2022-04-01",
+    {
+      properties: {
+        principalId,
+        principalType: "ServicePrincipal",
+        roleDefinitionId:
+          `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/${roleId}`
+      }
+    }
+  );
+}
+
+async function armPut<T = unknown>(
+  token: string,
+  resourceId: string,
+  apiVersion: string,
+  body: unknown
+): Promise<T> {
   const response = await fetch(
-    `https://management.azure.com${identityResourceId}/federatedIdentityCredentials/${name}?api-version=2023-01-31`,
+    `https://management.azure.com${resourceId}?api-version=${apiVersion}`,
     {
       method: "PUT",
       headers: {
-        authorization: `Bearer ${token.token}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        properties: {
-          audiences: ["api://AzureADTokenExchange"],
-          issuer: "https://token.actions.githubusercontent.com",
-          subject: `repo:${organization}/${repositorySlug}:ref:refs/heads/main`
-        }
-      })
+      body: JSON.stringify(body)
     }
   );
-  if (response.ok) return;
-  throw new Error(`Azure federated credential creation returned ${response.status}: ${await response.text()}`);
+  if (response.ok) return response.json() as Promise<T>;
+  throw new Error(`Azure resource ${resourceId} returned ${response.status}: ${await response.text()}`);
+}
+
+function deterministicGuid(value: string): string {
+  const hex = createHash("sha256").update(value).digest("hex").slice(0, 32).split("");
+  hex[12] = "5";
+  hex[16] = ((Number.parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8).join("")}-${hex.slice(8, 12).join("")}-${hex.slice(12, 16).join("")}-${hex.slice(16, 20).join("")}-${hex.slice(20).join("")}`;
 }
 
 async function createResource(path: string, body: unknown): Promise<void> {

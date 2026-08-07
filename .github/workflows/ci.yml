@@ -22,17 +22,20 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=critical
+      - run: npm run check:workflow-publication
 
   infrastructure:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Azure/setup-azd@v2
       - uses: azure/setup-helm@v4
+      - run: azd show --no-prompt
       - run: az bicep install
       - run: az bicep build --file infra/main.bicep --stdout >/dev/null
       - run: >-
           helm lint infra/helm/platform
-          --set workloadIdentityClientId=00000000-0000-0000-0000-000000000001
-          --set deployIdentityResourceId=/subscriptions/example/resourceGroups/example/providers/Microsoft.ManagedIdentity/userAssignedIdentities/example
+          --set platformClientId=00000000-0000-0000-0000-000000000001
+          --set platformIdentityResourceId=/subscriptions/example/resourceGroups/example/providers/Microsoft.ManagedIdentity/userAssignedIdentities/example
           --set tlsContactEmail=platform-owner@example.com
           --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

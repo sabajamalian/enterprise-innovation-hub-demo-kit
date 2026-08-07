@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: sabajamalian/enterprise-innovation-hub-demo-kit/.github/workflows/reusable-app-deploy.yml@8db502be8f55fecf0d512c056d1e9996acf609ec
+    uses: customer-organization/enterprise-innovation-hub-demo-kit/.github/workflows/reusable-app-deploy.yml@main
     with:
       app_name: ${{ vars.APP_NAME }}
       app_url: ${{ vars.APP_URL }}

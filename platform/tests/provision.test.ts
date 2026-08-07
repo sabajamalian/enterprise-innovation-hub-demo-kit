@@ -8,7 +8,9 @@ describe("idea provisioning", () => {
     const repositories = {
       create: vi.fn().mockResolvedValue({ repositoryUrl: "https://github.com/customer/shelf-signal" })
     };
-    const infrastructure = { create: vi.fn().mockResolvedValue(undefined) };
+    const infrastructure = {
+      create: vi.fn().mockResolvedValue({ deployClientId: "app-client-id" })
+    };
     const service = new IdeaProvisioner(new MemoryOperationStore(), repositories, infrastructure);
     const actor = { id: "1", name: "alex", groups: ["creator"] };
     const request = {
@@ -25,5 +27,8 @@ describe("idea provisioning", () => {
     expect(second.id).toBe(first.id);
     expect(repositories.create).toHaveBeenCalledTimes(1);
     expect(infrastructure.create).toHaveBeenCalledTimes(1);
+    expect(repositories.create).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({ AZURE_CLIENT_ID: "app-client-id" })
+    }));
   });
 });

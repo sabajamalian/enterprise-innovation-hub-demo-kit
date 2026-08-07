@@ -4,7 +4,12 @@ param acrName string
 param keyVaultName string
 param identityName string
 param tenantId string
-param githubSubject string
+@secure()
+param githubAppId string
+@secure()
+param githubAppInstallationId string
+@secure()
+param githubAppPrivateKey string
 
 var aksSubnetName = 'aks'
 var vnetName = 'vnet-${aksName}'
@@ -62,19 +67,27 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-resource deployIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: identityName
-  location: location
+resource githubAppIdSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'github-app-id'
+  properties: { value: githubAppId }
 }
 
-resource githubCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
-  parent: deployIdentity
-  name: 'github-main'
-  properties: {
-    audiences: ['api://AzureADTokenExchange']
-    issuer: 'https://token.actions.githubusercontent.com'
-    subject: githubSubject
-  }
+resource githubAppInstallationIdSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'github-app-installation-id'
+  properties: { value: githubAppInstallationId }
+}
+
+resource githubAppPrivateKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'github-app-private-key'
+  properties: { value: githubAppPrivateKey }
+}
+
+resource platformIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: identityName
+  location: location
 }
 
 resource aks 'Microsoft.ContainerService/managedClusters@2024-02-01' = {
@@ -140,7 +153,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-02-01' = {
 }
 
 resource hubCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
-  parent: deployIdentity
+  parent: platformIdentity
   name: 'hub-service-account'
   properties: {
     audiences: ['api://AzureADTokenExchange']
@@ -160,52 +173,43 @@ resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-var acrPushRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0749-4cb8-b61a-304f252e45ec')
-resource acrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, deployIdentity.id, acrPushRole)
-  scope: acr
-  properties: {
-    principalId: deployIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: acrPushRole
-  }
-}
-
-var clusterUserRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4abbcc35-e782-43d8-92c5-2d3f1bd2253f')
-resource clusterUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aks.id, deployIdentity.id, clusterUserRole)
-  scope: aks
-  properties: {
-    principalId: deployIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: clusterUserRole
-  }
-}
-
-var aksRbacWriterRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb')
-resource aksWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aks.id, deployIdentity.id, aksRbacWriterRole)
-  scope: aks
-  properties: {
-    principalId: deployIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: aksRbacWriterRole
-  }
-}
-
 var managedIdentityContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e40ec5ca-96e0-45a2-b4ff-59039f2c2b59')
 resource identityContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(deployIdentity.id, managedIdentityContributorRole)
-  scope: deployIdentity
+  name: guid(resourceGroup().id, platformIdentity.id, managedIdentityContributorRole)
+  scope: resourceGroup()
   properties: {
-    principalId: deployIdentity.properties.principalId
+    principalId: platformIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: managedIdentityContributorRole
+  }
+}
+
+var rbacAdministratorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f58310d9-a9f6-439a-9e8d-f62e7b41a168')
+resource rbacAdministrator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, platformIdentity.id, rbacAdministratorRole)
+  scope: resourceGroup()
+  properties: {
+    principalId: platformIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: rbacAdministratorRole
+    condition: '''((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {8311e382-0749-4cb8-b61a-304f252e45ec,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {8311e382-0749-4cb8-b61a-304f252e45ec,4abbcc35-e782-43d8-92c5-2d3f1bd2253f,a7ffa36f-339b-4b5c-8bdf-e2c188b2c0eb}))'''
+    conditionVersion: '2.0'
+  }
+}
+
+var keyVaultSecretsUserRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, platformIdentity.id, keyVaultSecretsUserRole)
+  scope: keyVault
+  properties: {
+    principalId: platformIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: keyVaultSecretsUserRole
   }
 }
 
 output aksName string = aks.name
 output acrName string = acr.name
 output keyVaultName string = keyVault.name
-output deployClientId string = deployIdentity.properties.clientId
-output deployIdentityResourceId string = deployIdentity.id
+output platformClientId string = platformIdentity.properties.clientId
+output platformIdentityResourceId string = platformIdentity.id

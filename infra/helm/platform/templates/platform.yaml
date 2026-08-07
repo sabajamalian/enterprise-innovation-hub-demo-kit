@@ -11,7 +11,7 @@ metadata:
   name: hub
   namespace: innovation-hub-system
   annotations:
-    azure.workload.identity/client-id: {{ required "workloadIdentityClientId is required" .Values.workloadIdentityClientId | quote }}
+    azure.workload.identity/client-id: {{ required "platformClientId is required" .Values.platformClientId | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -40,13 +40,14 @@ spec:
             - { name: ENTRA_CREATOR_GROUP_ID, value: {{ .Values.creatorGroupId | quote }} }
             - { name: ENTRA_ADMIN_GROUP_ID, value: {{ .Values.adminGroupId | quote }} }
             - { name: GITHUB_ORG, value: {{ .Values.githubOrganization | quote }} }
-            - { name: APP_DEPLOY_IDENTITY_RESOURCE_ID, value: {{ .Values.deployIdentityResourceId | quote }} }
-            - { name: APP_DEPLOY_CLIENT_ID, value: {{ .Values.workloadIdentityClientId | quote }} }
+            - { name: PLATFORM_IDENTITY_RESOURCE_ID, value: {{ .Values.platformIdentityResourceId | quote }} }
             - { name: AZURE_TENANT_ID, value: {{ .Values.azureTenantId | quote }} }
             - { name: AZURE_SUBSCRIPTION_ID, value: {{ .Values.azureSubscriptionId | quote }} }
             - { name: AZURE_RESOURCE_GROUP, value: {{ .Values.azureResourceGroup | quote }} }
+            - { name: AZURE_LOCATION, value: {{ .Values.azureLocation | quote }} }
             - { name: AKS_CLUSTER_NAME, value: {{ .Values.aksClusterName | quote }} }
             - { name: ACR_NAME, value: {{ .Values.acrName | quote }} }
+            - { name: KEY_VAULT_NAME, value: {{ .Values.keyVaultName | quote }} }
             - { name: APP_DOMAIN, value: {{ .Values.appDomain | quote }} }
             - name: DATABASE_URL
               valueFrom:
@@ -66,6 +67,41 @@ spec:
             capabilities: { drop: ["ALL"] }
             readOnlyRootFilesystem: true
           readinessProbe: { httpGet: { path: /api/health, port: 3000 } }
+---
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: hub-key-vault
+  namespace: innovation-hub-system
+spec:
+  provider:
+    azurekv:
+      authType: WorkloadIdentity
+      vaultUrl: "https://{{ required "keyVaultName is required" .Values.keyVaultName }}.vault.azure.net"
+      tenantId: {{ required "azureTenantId is required" .Values.azureTenantId | quote }}
+      serviceAccountRef:
+        name: hub
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hub-github-app
+  namespace: innovation-hub-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: hub-key-vault
+  target:
+    name: hub-github-app
+    creationPolicy: Owner
+  data:
+    - secretKey: app-id
+      remoteRef: { key: github-app-id }
+    - secretKey: installation-id
+      remoteRef: { key: github-app-installation-id }
+    - secretKey: private-key
+      remoteRef: { key: github-app-private-key }
 ---
 apiVersion: v1
 kind: Service

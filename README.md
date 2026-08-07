@@ -46,7 +46,7 @@ azd up
 
 ## Trust boundaries
 
-The browser never receives GitHub App credentials or Azure credentials. The Hub records an idempotent provisioning operation. Its server-side provisioner creates the repository and the application namespace. Generated repositories can deploy only through the centrally controlled reusable workflow, using an exact OIDC subject for `main`.
+The browser never receives GitHub App credentials or Azure credentials. GitHub App values are stored in Key Vault and synchronized to the Hub namespace through External Secrets and workload identity. The Hub records an idempotent provisioning operation. Its server-side provisioner creates the repository, a per-application Azure deployment identity, and the application namespace. Generated repositories can deploy only through the centrally controlled reusable workflow, using an exact OIDC subject for `main` and namespace-scoped AKS authorization.
 
 See `docs-site/src/content/docs/architecture.md` for the full system and `platform/src/lib/contracts.ts` for the public provisioning contract.
 
