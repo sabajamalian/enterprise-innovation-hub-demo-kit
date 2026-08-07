@@ -19,7 +19,7 @@ for variable in $required_variables; do
 done
 
 az account show --output none
-case "$AZURE_TENANT_ID:$ENTRA_CREATOR_GROUP_ID:$ENTRA_ADMIN_GROUP_ID" in
+case "$AZURE_TENANT_ID:$AZURE_PRINCIPAL_ID:$ENTRA_CREATOR_GROUP_ID:$ENTRA_ADMIN_GROUP_ID" in
   *00000000-0000-0000-0000-000000000000*)
     echo "Replace example UUIDs before deployment." >&2
     exit 1
