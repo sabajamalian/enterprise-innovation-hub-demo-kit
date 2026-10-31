@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@azure/identity": "^4.8.0",
+    "@azure/identity": "^4.14.1",
     "@octokit/auth-app": "^7.2.1",
     "@octokit/rest": "^21.1.1",
     "next": "^15.2.4",
